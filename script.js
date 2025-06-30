@@ -147,14 +147,25 @@ function createBalancedTeams(players, numTeams) {
     if (unassignedPlayers.length > 0) {
         console.log(`⚠️ ADVERTENCIA: ${unassignedPlayers.length} jugadores sin asignar:`, unassignedPlayers.map(p => p.name));
         
-        // Asignar jugadores restantes a equipos con espacio
+        // Asignar jugadores restantes a equipos con espacio (máximo 5 por equipo)
         for (const player of unassignedPlayers) {
             let assigned = false;
             
-            // Buscar equipo con menos jugadores
-            teams.sort((a, b) => a.players.length - b.players.length);
+            // Buscar equipo con menos jugadores (priorizar equipos incompletos)
+            teams.sort((a, b) => {
+                // Priorizar equipos con menos de 5 jugadores
+                if (a.players.length < 5 && b.players.length >= 5) return -1;
+                if (a.players.length >= 5 && b.players.length < 5) return 1;
+                // Si ambos tienen menos de 5, priorizar el que tiene menos jugadores
+                if (a.players.length < 5 && b.players.length < 5) {
+                    return a.players.length - b.players.length;
+                }
+                // Si ambos tienen 5 o más, priorizar el que tiene menos jugadores
+                return a.players.length - b.players.length;
+            });
             
             for (const team of teams) {
+                // Solo asignar si el equipo tiene menos de 5 jugadores
                 if (team.players.length < 5) {
                     team.players.push(player);
                     team.totalMMR += player.mmr;
@@ -166,7 +177,7 @@ function createBalancedTeams(players, numTeams) {
             }
             
             if (!assigned) {
-                console.log(`❌ ERROR: No se pudo asignar ${player.name} - todos los equipos están llenos`);
+                console.log(`❌ ERROR: No se pudo asignar ${player.name} - todos los equipos están llenos (5 jugadores)`);
             }
         }
     } else {
@@ -176,7 +187,10 @@ function createBalancedTeams(players, numTeams) {
     // 8. Optimización final: intercambiar jugadores para reducir la desviación estándar de MMR
     optimizeTeamsStdDev(teams, targetMMR);
 
-    // 9. Revisión final: evitar doble core, priorizar doble support
+    // 9. Verificación final: asegurar que ningún equipo tenga más de 5 jugadores
+    enforceTeamSizeLimit(teams);
+
+    // 10. Revisión final: evitar doble core, priorizar doble support
     for (const team of teams) {
         // Contar roles
         const roleCount = {1:0, 2:0, 3:0, 4:0, 5:0};
@@ -440,27 +454,31 @@ function calculateTeamBalanceScore(team, targetMMR) {
     let score = 10000;
     
     // PRIORIDAD 1: Balance del total MMR (peso muy alto)
-    score -= targetDeviation * 2.0; // Aumentar peso del balance total
+    score -= targetDeviation * 3.0; // Aumentar peso del balance total
     
-    // PRIORIDAD 2: Distribución interna (peso menor)
-    score -= stdDev * 0.3; // Reducir peso de desviación estándar
+    // PRIORIDAD 2: Penalización severa para equipos con más de 5 jugadores
+    if (team.players.length > 5) {
+        score -= (team.players.length - 5) * 10000; // Penalización muy severa
+    } else if (team.players.length < 5) {
+        score -= (5 - team.players.length) * 5000; // Penalización por equipos incompletos
+    }
+    
+    // PRIORIDAD 3: Distribución interna (peso menor)
+    score -= stdDev * 0.2; // Reducir peso de desviación estándar
     
     // Bonus por roles únicos
     score += team.roles.size * 100;
     
-    // Penalizar equipos con muchos jugadores
-    score -= team.players.length * 10;
-    
     // Penalización especial para equipos con jugadores de MMR muy alto (peso menor)
     const maxMMR = Math.max(...mmrs);
     if (maxMMR > 8000) {
-        score -= (maxMMR - 8000) * 0.1; // Reducir penalización
+        score -= (maxMMR - 8000) * 0.05; // Reducir penalización
     }
     
     // Bonus por equipos con MMR más uniforme (peso menor)
     const minMMR = Math.min(...mmrs);
     const mmrRange = maxMMR - minMMR;
-    score -= mmrRange * 0.05; // Reducir penalización del rango
+    score -= mmrRange * 0.03; // Reducir penalización del rango
     
     return score;
 }
@@ -488,9 +506,9 @@ function aggressiveOptimization(teams, targetMMR) {
     while (iterations < maxIterations) {
         iterations++;
         
-        // PRIORIDAD 1: Encontrar equipos con mayor y menor MMR total
-        let maxTeamIndex = 0;
-        let minTeamIndex = 0;
+        // PRIORIDAD 1: Encontrar equipos con mayor y menor MMR total (solo equipos completos de 5)
+        let maxTeamIndex = -1;
+        let minTeamIndex = -1;
         let maxMMR = -Infinity;
         let minMMR = Infinity;
         
@@ -507,8 +525,17 @@ function aggressiveOptimization(teams, targetMMR) {
             }
         }
         
+        // Si no hay equipos completos de 5 jugadores, terminar
+        if (maxTeamIndex === -1 || minTeamIndex === -1) {
+            console.log('No hay equipos completos de 5 jugadores para optimizar');
+            break;
+        }
+        
         // Si la diferencia de MMR total es muy pequeña, terminar
-        if (maxMMR - minMMR < targetMMR * 0.05) break;
+        if (maxMMR - minMMR < targetMMR * 0.03) {
+            console.log('Diferencia de MMR total muy pequeña, terminando optimización');
+            break;
+        }
         
         // Intentar intercambiar jugadores para mejorar balance del total
         const maxTeam = teams[maxTeamIndex];
@@ -540,27 +567,30 @@ function aggressiveOptimization(teams, targetMMR) {
                 const newDiff = Math.abs(newMaxMMR - newMinMMR);
                 const totalImprovement = currentDiff - newDiff;
                 
-                // Bonus por mejorar distribución interna
-                const tempMaxTeam = {
-                    ...maxTeam,
-                    players: maxTeam.players.map(p => p.name === player1.name ? player2 : p),
-                    totalMMR: newMaxMMR
-                };
-                
-                const tempMinTeam = {
-                    ...minTeam,
-                    players: minTeam.players.map(p => p.name === player2.name ? player1 : p),
-                    totalMMR: newMinMMR
-                };
-                
-                const internalImprovement = (calculateTeamBalanceScore(tempMaxTeam, targetMMR) - calculateTeamBalanceScore(maxTeam, targetMMR)) +
-                                          (calculateTeamBalanceScore(tempMinTeam, targetMMR) - calculateTeamBalanceScore(minTeam, targetMMR));
-                
-                const totalScore = totalImprovement * 10 + internalImprovement * 0.1; // Priorizar balance total
-                
-                if (totalScore > bestImprovement) {
-                    bestImprovement = totalScore;
-                    bestSwap = { player1, player2, newMaxMMR, newMinMMR, tempMaxTeam, tempMinTeam };
+                // Solo considerar intercambios que mejoren significativamente el balance total
+                if (totalImprovement > 500) {
+                    // Bonus por mejorar distribución interna
+                    const tempMaxTeam = {
+                        ...maxTeam,
+                        players: maxTeam.players.map(p => p.name === player1.name ? player2 : p),
+                        totalMMR: newMaxMMR
+                    };
+                    
+                    const tempMinTeam = {
+                        ...minTeam,
+                        players: minTeam.players.map(p => p.name === player2.name ? player1 : p),
+                        totalMMR: newMinMMR
+                    };
+                    
+                    const internalImprovement = (calculateTeamBalanceScore(tempMaxTeam, targetMMR) - calculateTeamBalanceScore(maxTeam, targetMMR)) +
+                                              (calculateTeamBalanceScore(tempMinTeam, targetMMR) - calculateTeamBalanceScore(minTeam, targetMMR));
+                    
+                    const totalScore = totalImprovement * 15 + internalImprovement * 0.1; // Priorizar balance total
+                    
+                    if (totalScore > bestImprovement) {
+                        bestImprovement = totalScore;
+                        bestSwap = { player1, player2, newMaxMMR, newMinMMR };
+                    }
                 }
             }
         }
@@ -588,84 +618,13 @@ function aggressiveOptimization(teams, targetMMR) {
                 console.log(`Intercambio total: ${player1.name} (${player1.role}) ↔ ${player2.name} (${player2.role}) - Mejora total: ${bestImprovement.toFixed(2)}`);
             }
         } else {
-            // Si no se encontró mejora en balance total, intentar optimización específica
-            if (!optimizeByTotalMMR(teams, targetMMR)) {
-                break;
-            }
+            // Si no se encontró mejora en balance total, terminar
+            console.log('No se encontraron más mejoras en el balance total');
+            break;
         }
     }
     
     console.log(`Optimización total completada en ${iterations} iteraciones`);
-}
-
-// Optimización específica por total MMR
-function optimizeByTotalMMR(teams, targetMMR) {
-    // Encontrar equipos con mayor y menor MMR total
-    let maxTeamIndex = 0;
-    let minTeamIndex = 0;
-    let maxMMR = -Infinity;
-    let minMMR = Infinity;
-    
-    for (let i = 0; i < teams.length; i++) {
-        if (teams[i].players.length === 5) {
-            if (teams[i].totalMMR > maxMMR) {
-                maxMMR = teams[i].totalMMR;
-                maxTeamIndex = i;
-            }
-            if (teams[i].totalMMR < minMMR) {
-                minMMR = teams[i].totalMMR;
-                minTeamIndex = i;
-            }
-        }
-    }
-    
-    const maxTeam = teams[maxTeamIndex];
-    const minTeam = teams[minTeamIndex];
-    
-    // Buscar intercambios que mejoren significativamente el balance del total
-    const maxPlayers = maxTeam.players.sort((a, b) => b.mmr - a.mmr);
-    const minPlayers = minTeam.players.sort((a, b) => a.mmr - b.mmr);
-    
-    // Intentar intercambiar jugadores con mayor diferencia de MMR
-    for (const highPlayer of maxPlayers.slice(0, 3)) {
-        for (const lowPlayer of minPlayers.slice(0, 3)) {
-            if (highPlayer.role === lowPlayer.role) continue;
-            
-            // Verificar que el intercambio no rompa roles
-            if (maxTeam.roles.has(lowPlayer.role) || minTeam.roles.has(highPlayer.role)) continue;
-            
-            // Calcular mejora en balance total
-            const newMaxMMR = maxTeam.totalMMR - highPlayer.mmr + lowPlayer.mmr;
-            const newMinMMR = minTeam.totalMMR - lowPlayer.mmr + highPlayer.mmr;
-            
-            const currentDiff = maxMMR - minMMR;
-            const newDiff = Math.abs(newMaxMMR - newMinMMR);
-            const improvement = currentDiff - newDiff;
-            
-            // Solo hacer el intercambio si mejora significativamente el balance total
-            if (improvement > 1000) {
-                // Encontrar índices
-                const index1 = maxTeam.players.findIndex(p => p.name === highPlayer.name);
-                const index2 = minTeam.players.findIndex(p => p.name === lowPlayer.name);
-                
-                maxTeam.players[index1] = lowPlayer;
-                minTeam.players[index2] = highPlayer;
-                maxTeam.totalMMR = newMaxMMR;
-                minTeam.totalMMR = newMinMMR;
-                
-                // Actualizar roles
-                maxTeam.roles.delete(highPlayer.role);
-                maxTeam.roles.add(lowPlayer.role);
-                minTeam.roles.delete(lowPlayer.role);
-                minTeam.roles.add(highPlayer.role);
-                
-                console.log(`Optimización total MMR: ${highPlayer.name} (${highPlayer.role}) ↔ ${lowPlayer.name} (${lowPlayer.role}) - Mejora: ${improvement}`);
-                return true;
-            }
-        }
-    }
-    
-    return false;
 }
 
 // Función para rebalancear equipos
@@ -924,7 +883,7 @@ function loadSampleData() {
         { name: "Abogado de KeiiKo", id: "1020273794", mmr: 2800, role: 4 },
         { name: "Piero (DIN)", id: "376381268", mmr: 3850, role: 4 },
         { name: "Benja", id: "366882489", mmr: 9200, role: 2 },
-        { name: "Desux", id: "1289611343", mmr: 7044, role: 5 },
+        { name: "Desux", id: "1289611343", mmr: 7344, role: 1 },
         { name: "Ladoadaniel", id: "1281633731", mmr: 3930, role: 4 },
         { name: "Jhanker", id: "186010043", mmr: 4737, role: 4 },
         { name: "Kase", id: "416279328", mmr: 4700, role: 3 },
@@ -1291,5 +1250,68 @@ function loadPlayers() {
             player.index = index;
         });
         console.log(`${players.length} jugadores cargados desde localStorage`);
+    }
+}
+
+// Función para asegurar que ningún equipo tenga más de 5 jugadores
+function enforceTeamSizeLimit(teams) {
+    let hasChanges = true;
+    let maxIterations = 10;
+    
+    while (hasChanges && maxIterations-- > 0) {
+        hasChanges = false;
+        
+        // Encontrar equipos con más de 5 jugadores
+        const oversizedTeams = teams.filter(team => team.players.length > 5);
+        const undersizedTeams = teams.filter(team => team.players.length < 5);
+        
+        if (oversizedTeams.length === 0) {
+            console.log('✅ Todos los equipos tienen 5 o menos jugadores');
+            break;
+        }
+        
+        console.log(`⚠️ Encontrados ${oversizedTeams.length} equipos con más de 5 jugadores`);
+        
+        for (const oversizedTeam of oversizedTeams) {
+            if (oversizedTeam.players.length <= 5) continue;
+            
+            // Remover jugadores excedentes y ponerlos en equipos con espacio
+            const excessPlayers = oversizedTeam.players.slice(5);
+            oversizedTeam.players = oversizedTeam.players.slice(0, 5);
+            
+            // Recalcular MMR y roles del equipo oversized
+            oversizedTeam.totalMMR = oversizedTeam.players.reduce((sum, p) => sum + p.mmr, 0);
+            oversizedTeam.roles.clear();
+            oversizedTeam.players.forEach(p => oversizedTeam.roles.add(p.role));
+            
+            console.log(`📤 Removidos ${excessPlayers.length} jugadores del equipo oversized:`, excessPlayers.map(p => p.name));
+            
+            // Asignar jugadores excedentes a equipos con espacio
+            for (const player of excessPlayers) {
+                let assigned = false;
+                
+                // Buscar equipo con menos de 5 jugadores
+                for (const team of undersizedTeams) {
+                    if (team.players.length < 5) {
+                        team.players.push(player);
+                        team.totalMMR += player.mmr;
+                        team.roles.add(player.role);
+                        assigned = true;
+                        console.log(`✅ Jugador ${player.name} reasignado a equipo con ${team.players.length} jugadores`);
+                        break;
+                    }
+                }
+                
+                if (!assigned) {
+                    console.log(`❌ No se pudo reasignar ${player.name} - no hay equipos con espacio`);
+                }
+            }
+            
+            hasChanges = true;
+        }
+    }
+    
+    if (maxIterations <= 0) {
+        console.log('⚠️ Se alcanzó el límite de iteraciones en enforceTeamSizeLimit');
     }
 }
