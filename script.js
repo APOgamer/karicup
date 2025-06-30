@@ -89,6 +89,9 @@ function generateTeams() {
         team.players.sort((a, b) => a.role - b.role);
     });
     
+    // Verificación final: asegurar que todos los equipos tengan exactamente 5 jugadores
+    enforceExactTeamSize(teams);
+    
     // Verificación final
     const assignedPlayers = teams.flatMap(team => team.players);
     const unassignedCount = players.length - assignedPlayers.length;
@@ -120,7 +123,7 @@ function createBalancedTeams(players, numTeams) {
     console.log(`Jugadores totales: ${players.length}`);
     
     // Algoritmo de snake draft por rol para equipos balanceados
-    const teams = createTeamsWithDynamicProgramming(players, numTeams, targetMMR);
+    let teams = createTeamsWithDynamicProgramming(players, numTeams, targetMMR);
     
     console.log(`=== DESPUÉS DE ASIGNACIÓN INICIAL ===`);
     teams.forEach((team, index) => {
@@ -184,13 +187,23 @@ function createBalancedTeams(players, numTeams) {
         console.log(`✅ Todos los ${players.length} jugadores han sido asignados correctamente`);
     }
     
-    // 8. Optimización final: intercambiar jugadores para reducir la desviación estándar de MMR
-    optimizeTeamsStdDev(teams, targetMMR);
+    // 8. Optimización final agresiva con múltiples estrategias
+    console.log("🚀 Iniciando optimización agresiva final...");
+    teams = optimizeTeams(teams, targetMMR);
 
     // 9. Verificación final: asegurar que ningún equipo tenga más de 5 jugadores
-    enforceTeamSizeLimit(teams);
+    enforceExactTeamSize(teams);
 
-    // 10. Revisión final: evitar doble core, priorizar doble support
+    // 10. Optimización global entre todos los equipos
+    globalTeamOptimization(teams, targetMMR);
+
+    // 11. Optimización matemática avanzada con programación dinámica
+    advancedMathematicalOptimization(teams, targetMMR);
+
+    // 12. Optimización final con simulated annealing
+    simulatedAnnealingOptimization(teams, targetMMR);
+
+    // 13. Revisión final: evitar doble core, priorizar doble support
     for (const team of teams) {
         // Contar roles
         const roleCount = {1:0, 2:0, 3:0, 4:0, 5:0};
@@ -379,56 +392,92 @@ function createTeamsWithDynamicProgramming(players, numTeams, targetMMR) {
         }
     }
 
-    // 8. Optimización final: intercambiar jugadores para reducir la desviación estándar de MMR
-    optimizeTeamsStdDev(teams, targetMMR);
-
     return teams;
 }
 
 // Optimización para reducir la desviación estándar de MMR entre equipos
 function optimizeTeamsStdDev(teams, targetMMR) {
     let improved = true;
-    let maxTries = 100;
+    let maxTries = 200; // Aumentar significativamente las iteraciones
+    
     while (improved && maxTries-- > 0) {
         improved = false;
+        
         // Buscar los dos equipos más desbalanceados
         let maxTeam = teams[0], minTeam = teams[0];
+        let maxMMR = -Infinity, minMMR = Infinity;
+        
         for (const team of teams) {
-            if (team.totalMMR > maxTeam.totalMMR) maxTeam = team;
-            if (team.totalMMR < minTeam.totalMMR) minTeam = team;
-        }
-        // Intentar intercambiar jugadores de rol igual
-        let bestSwap = null;
-        let bestStdDev = stdDev(teams.map(t => t.totalMMR));
-        for (const p1 of maxTeam.players) {
-            for (const p2 of minTeam.players) {
-                if (p1.role !== p2.role) continue;
-                // Simular swap
-                let newMaxMMR = maxTeam.totalMMR - p1.mmr + p2.mmr;
-                let newMinMMR = minTeam.totalMMR - p2.mmr + p1.mmr;
-                let mmrs = teams.map(t => {
-                    if (t === maxTeam) return newMaxMMR;
-                    if (t === minTeam) return newMinMMR;
-                    return t.totalMMR;
-                });
-                let newStdDev = stdDev(mmrs);
-                if (newStdDev < bestStdDev) {
-                    bestStdDev = newStdDev;
-                    bestSwap = { p1, p2 };
+            if (team.players.length === 5) {
+                if (team.totalMMR > maxMMR) {
+                    maxMMR = team.totalMMR;
+                    maxTeam = team;
+                }
+                if (team.totalMMR < minMMR) {
+                    minMMR = team.totalMMR;
+                    minTeam = team;
                 }
             }
         }
+        
+        const currentDifference = maxMMR - minMMR;
+        
+        // Si la diferencia es muy pequeña, terminar
+        if (currentDifference < 50) {
+            console.log('Diferencia muy pequeña en optimizeTeamsStdDev, terminando');
+            break;
+        }
+        
+        // Intentar intercambiar jugadores de rol igual
+        let bestSwap = null;
+        let bestImprovement = 0;
+        
+        for (const p1 of maxTeam.players) {
+            for (const p2 of minTeam.players) {
+                if (p1.role !== p2.role) continue;
+                
+                // Simular swap
+                let newMaxMMR = maxTeam.totalMMR - p1.mmr + p2.mmr;
+                let newMinMMR = minTeam.totalMMR - p2.mmr + p1.mmr;
+                let newDifference = Math.abs(newMaxMMR - newMinMMR);
+                let improvement = currentDifference - newDifference;
+                
+                // Solo considerar mejoras significativas
+                if (improvement > 20) {
+                    let mmrs = teams.map(t => {
+                        if (t === maxTeam) return newMaxMMR;
+                        if (t === minTeam) return newMinMMR;
+                        return t.totalMMR;
+                    });
+                    let newStdDev = stdDev(mmrs);
+                    let currentStdDev = stdDev(teams.map(t => t.totalMMR));
+                    
+                    // Priorizar mejoras en la diferencia total
+                    let totalScore = improvement * 10 + (currentStdDev - newStdDev) * 100;
+                    
+                    if (totalScore > bestImprovement) {
+                        bestImprovement = totalScore;
+                        bestSwap = { p1, p2, newMaxMMR, newMinMMR };
+                    }
+                }
+            }
+        }
+        
         if (bestSwap) {
             // Realizar swap
             let idx1 = maxTeam.players.indexOf(bestSwap.p1);
             let idx2 = minTeam.players.indexOf(bestSwap.p2);
             maxTeam.players[idx1] = bestSwap.p2;
             minTeam.players[idx2] = bestSwap.p1;
-            maxTeam.totalMMR = maxTeam.totalMMR - bestSwap.p1.mmr + bestSwap.p2.mmr;
-            minTeam.totalMMR = minTeam.totalMMR - bestSwap.p2.mmr + bestSwap.p1.mmr;
+            maxTeam.totalMMR = bestSwap.newMaxMMR;
+            minTeam.totalMMR = bestSwap.newMinMMR;
             improved = true;
+            
+            console.log(`📊 Swap stdDev: ${bestSwap.p1.name} (${bestSwap.p1.mmr}) ↔ ${bestSwap.p2.name} (${bestSwap.p2.mmr}) - Mejora: ${bestImprovement.toFixed(2)}`);
         }
     }
+    
+    console.log(`Optimización stdDev completada en ${200 - maxTries} iteraciones`);
 }
 
 function stdDev(arr) {
@@ -454,7 +503,7 @@ function calculateTeamBalanceScore(team, targetMMR) {
     let score = 10000;
     
     // PRIORIDAD 1: Balance del total MMR (peso muy alto)
-    score -= targetDeviation * 3.0; // Aumentar peso del balance total
+    score -= targetDeviation * 5.0; // Aumentar peso del balance total
     
     // PRIORIDAD 2: Penalización severa para equipos con más de 5 jugadores
     if (team.players.length > 5) {
@@ -463,22 +512,35 @@ function calculateTeamBalanceScore(team, targetMMR) {
         score -= (5 - team.players.length) * 5000; // Penalización por equipos incompletos
     }
     
-    // PRIORIDAD 3: Distribución interna (peso menor)
-    score -= stdDev * 0.2; // Reducir peso de desviación estándar
+    // PRIORIDAD 3: BONUS por equipos con MMR muy alto y muy bajo juntos (nueva lógica)
+    const maxMMR = Math.max(...mmrs);
+    const minMMR = Math.min(...mmrs);
+    const mmrRange = maxMMR - minMMR;
+    
+    // Bonus por tener MMR muy alto y muy bajo en el mismo equipo
+    if (maxMMR >= 7000 && minMMR <= 2000) {
+        score += 5000; // Bonus muy alto por balance extremo
+    } else if (maxMMR >= 6000 && minMMR <= 3000) {
+        score += 3000; // Bonus alto por balance moderado
+    } else if (maxMMR >= 5000 && minMMR <= 4000) {
+        score += 1000; // Bonus bajo por balance suave
+    }
+    
+    // Penalización por equipos con MMR muy similares (todos altos o todos bajos)
+    if (mmrRange < 1000 && maxMMR > 5000) {
+        score -= 8000; // Penalización muy severa por equipo de solo altos MMR
+    } else if (mmrRange < 1000 && maxMMR < 3000) {
+        score -= 6000; // Penalización severa por equipo de solo bajos MMR
+    }
+    
+    // PRIORIDAD 4: Distribución interna (peso menor)
+    score -= stdDev * 0.1; // Reducir peso de desviación estándar
     
     // Bonus por roles únicos
     score += team.roles.size * 100;
     
-    // Penalización especial para equipos con jugadores de MMR muy alto (peso menor)
-    const maxMMR = Math.max(...mmrs);
-    if (maxMMR > 8000) {
-        score -= (maxMMR - 8000) * 0.05; // Reducir penalización
-    }
-    
     // Bonus por equipos con MMR más uniforme (peso menor)
-    const minMMR = Math.min(...mmrs);
-    const mmrRange = maxMMR - minMMR;
-    score -= mmrRange * 0.03; // Reducir penalización del rango
+    score -= mmrRange * 0.01; // Reducir penalización del rango
     
     return score;
 }
@@ -501,7 +563,7 @@ function isTeamsBalanced(teams, targetMMR) {
 // Optimización agresiva para balancear equipos
 function aggressiveOptimization(teams, targetMMR) {
     let iterations = 0;
-    const maxIterations = 50; // Aumentar iteraciones
+    const maxIterations = 500; // Aumentar significativamente las iteraciones
     
     while (iterations < maxIterations) {
         iterations++;
@@ -531,9 +593,13 @@ function aggressiveOptimization(teams, targetMMR) {
             break;
         }
         
+        // Calcular diferencia actual
+        const currentDifference = maxMMR - minMMR;
+        console.log(`Iteración ${iterations}: Diferencia actual = ${currentDifference} (${maxMMR} - ${minMMR})`);
+        
         // Si la diferencia de MMR total es muy pequeña, terminar
-        if (maxMMR - minMMR < targetMMR * 0.03) {
-            console.log('Diferencia de MMR total muy pequeña, terminando optimización');
+        if (currentDifference < 50) {
+            console.log('Diferencia de MMR total muy pequeña (< 50), terminando optimización');
             break;
         }
         
@@ -563,12 +629,11 @@ function aggressiveOptimization(teams, targetMMR) {
                 const newMinMMR = minTeam.totalMMR - player2.mmr + player1.mmr;
                 
                 // PRIORIDAD: Mejorar balance del total MMR
-                const currentDiff = maxMMR - minMMR;
-                const newDiff = Math.abs(newMaxMMR - newMinMMR);
-                const totalImprovement = currentDiff - newDiff;
+                const newDifference = Math.abs(newMaxMMR - newMinMMR);
+                const totalImprovement = currentDifference - newDifference;
                 
                 // Solo considerar intercambios que mejoren significativamente el balance total
-                if (totalImprovement > 500) {
+                if (totalImprovement > 10) { // Reducir aún más el umbral para ser muy agresivo
                     // Bonus por mejorar distribución interna
                     const tempMaxTeam = {
                         ...maxTeam,
@@ -585,7 +650,7 @@ function aggressiveOptimization(teams, targetMMR) {
                     const internalImprovement = (calculateTeamBalanceScore(tempMaxTeam, targetMMR) - calculateTeamBalanceScore(maxTeam, targetMMR)) +
                                               (calculateTeamBalanceScore(tempMinTeam, targetMMR) - calculateTeamBalanceScore(minTeam, targetMMR));
                     
-                    const totalScore = totalImprovement * 15 + internalImprovement * 0.1; // Priorizar balance total
+                    const totalScore = totalImprovement * 30 + internalImprovement * 0.1; // Aumentar aún más el peso del balance total
                     
                     if (totalScore > bestImprovement) {
                         bestImprovement = totalScore;
@@ -615,16 +680,83 @@ function aggressiveOptimization(teams, targetMMR) {
                 minTeam.roles.delete(player2.role);
                 minTeam.roles.add(player1.role);
                 
-                console.log(`Intercambio total: ${player1.name} (${player1.role}) ↔ ${player2.name} (${player2.role}) - Mejora total: ${bestImprovement.toFixed(2)}`);
+                console.log(`✅ Intercambio: ${player1.name} (${player1.role}, ${player1.mmr}) ↔ ${player2.name} (${player2.role}, ${player2.mmr}) - Mejora: ${bestImprovement.toFixed(2)}`);
             }
         } else {
-            // Si no se encontró mejora en balance total, terminar
-            console.log('No se encontraron más mejoras en el balance total');
-            break;
+            // Si no se encontró mejora, intentar intercambios más agresivos
+            if (!tryAggressiveSwaps(teams, targetMMR)) {
+                console.log('No se encontraron más mejoras en el balance total');
+                break;
+            }
         }
     }
     
     console.log(`Optimización total completada en ${iterations} iteraciones`);
+}
+
+// Función para intentar intercambios más agresivos
+function tryAggressiveSwaps(teams, targetMMR) {
+    // Encontrar equipos con mayor y menor MMR total
+    let maxTeamIndex = 0;
+    let minTeamIndex = 0;
+    let maxMMR = -Infinity;
+    let minMMR = Infinity;
+    
+    for (let i = 0; i < teams.length; i++) {
+        if (teams[i].players.length === 5) {
+            if (teams[i].totalMMR > maxMMR) {
+                maxMMR = teams[i].totalMMR;
+                maxTeamIndex = i;
+            }
+            if (teams[i].totalMMR < minMMR) {
+                minMMR = teams[i].totalMMR;
+                minTeamIndex = i;
+            }
+        }
+    }
+    
+    const maxTeam = teams[maxTeamIndex];
+    const minTeam = teams[minTeamIndex];
+    const currentDifference = maxMMR - minMMR;
+    
+    // Buscar cualquier intercambio que mejore el balance, sin importar roles
+    const maxPlayers = maxTeam.players.sort((a, b) => b.mmr - a.mmr);
+    const minPlayers = minTeam.players.sort((a, b) => a.mmr - b.mmr);
+    
+    // Intentar intercambiar jugadores con mayor diferencia de MMR
+    for (const highPlayer of maxPlayers) {
+        for (const lowPlayer of minPlayers) {
+            // Calcular mejora en balance total
+            const newMaxMMR = maxTeam.totalMMR - highPlayer.mmr + lowPlayer.mmr;
+            const newMinMMR = minTeam.totalMMR - lowPlayer.mmr + highPlayer.mmr;
+            
+            const newDifference = Math.abs(newMaxMMR - newMinMMR);
+            const improvement = currentDifference - newDifference;
+            
+            // Solo hacer el intercambio si mejora el balance total (cualquier mejora)
+            if (improvement > 1) { // Umbral extremadamente bajo para ser muy agresivo
+                // Encontrar índices
+                const index1 = maxTeam.players.findIndex(p => p.name === highPlayer.name);
+                const index2 = minTeam.players.findIndex(p => p.name === lowPlayer.name);
+                
+                maxTeam.players[index1] = lowPlayer;
+                minTeam.players[index2] = highPlayer;
+                maxTeam.totalMMR = newMaxMMR;
+                minTeam.totalMMR = newMinMMR;
+                
+                // Actualizar roles
+                maxTeam.roles.delete(highPlayer.role);
+                maxTeam.roles.add(lowPlayer.role);
+                minTeam.roles.delete(lowPlayer.role);
+                minTeam.roles.add(highPlayer.role);
+                
+                console.log(`🔥 Intercambio agresivo: ${highPlayer.name} (${highPlayer.role}, ${highPlayer.mmr}) ↔ ${lowPlayer.name} (${lowPlayer.role}, ${lowPlayer.mmr}) - Mejora: ${improvement}`);
+                return true;
+            }
+        }
+    }
+    
+    return false;
 }
 
 // Función para rebalancear equipos
@@ -865,7 +997,7 @@ function displayStats(teams) {
 function loadSampleData() {
     const sampleData = [
         { name: "Arturia", id: "1113982609", mmr: 2234, role: 3 },
-        { name: "Artyk-[Sebas-]", id: "199455408", mmr: 5900, role: 3 },
+        { name: "Artyk-[Sebas-]", id: "199455408", mmr: 7900, role: 3 },
         { name: "NOK´CHA", id: "205124267", mmr: 3700, role: 4 },
         { name: "Logaritmo", id: "1527089650", mmr: 1420, role: 5 },
         { name: "TheKing", id: null, mmr: 8000, role: 5 },
@@ -1186,6 +1318,12 @@ function updateStats() {
     const maxDifference = Math.max(...mmrDifferences);
     const minDifference = Math.min(...mmrDifferences);
     
+    // Calcular diferencia entre el equipo con mayor y menor MMR total
+    const teamMMRs = teams.map(team => team.totalMMR);
+    const maxTeamMMR = Math.max(...teamMMRs);
+    const minTeamMMR = Math.min(...teamMMRs);
+    const totalMMRDifference = maxTeamMMR - minTeamMMR;
+    
     const teamStats = teams.map((team, index) => ({
         team: index + 1,
         totalMMR: team.totalMMR,
@@ -1194,9 +1332,40 @@ function updateStats() {
         difference: Math.abs(team.totalMMR - avgMMR)
     }));
     
+    // Ordenar equipos por total MMR para mostrar mejor la distribución
+    teamStats.sort((a, b) => b.totalMMR - a.totalMMR);
+    
     statsContainer.innerHTML = `
         <div class="stats">
             <h3>📊 Estadísticas de Equipos</h3>
+            
+            <!-- PRIORIDAD: Diferencia del Total MMR entre equipos -->
+            <div style="background: rgba(255, 215, 0, 0.2); border: 2px solid #ffd700; border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+                <h4 style="color: #ffd700; margin: 0 0 10px 0; text-align: center;">🎯 PRIORIDAD: Balance del Total MMR</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; text-align: center;">
+                    <div>
+                        <div style="font-size: 24px; font-weight: bold; color: #ffd700;">${totalMMRDifference}</div>
+                        <div style="font-size: 14px;">Diferencia Total MMR</div>
+                        <div style="font-size: 12px; opacity: 0.8;">(Mayor - Menor)</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 24px; font-weight: bold; color: #2ecc71;">${Math.round(totalMMRDifference / avgMMR * 100)}%</div>
+                        <div style="font-size: 14px;">Porcentaje de Diferencia</div>
+                        <div style="font-size: 12px; opacity: 0.8;">(vs Promedio Global)</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 24px; font-weight: bold; color: #e74c3c;">${maxTeamMMR}</div>
+                        <div style="font-size: 14px;">Mayor Total MMR</div>
+                        <div style="font-size: 12px; opacity: 0.8;">(Equipo más fuerte)</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 24px; font-weight: bold; color: #3498db;">${minTeamMMR}</div>
+                        <div style="font-size: 14px;">Menor Total MMR</div>
+                        <div style="font-size: 12px; opacity: 0.8;">(Equipo más débil)</div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="stats-grid">
                 <div class="stat-item">
                     <div class="stat-value">${teams.length}</div>
@@ -1208,24 +1377,26 @@ function updateStats() {
                 </div>
                 <div class="stat-item">
                     <div class="stat-value">${maxDifference}</div>
-                    <div class="stat-label">Mayor Diferencia de MMR</div>
+                    <div class="stat-label">Mayor Desviación</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-value">${minDifference}</div>
-                    <div class="stat-label">Menor Diferencia de MMR</div>
+                    <div class="stat-label">Menor Desviación</div>
                 </div>
             </div>
             
-            <h4 style="margin-top: 20px; color: #ffd700;">Detalles por Equipo:</h4>
+            <h4 style="margin-top: 20px; color: #ffd700;">Detalles por Equipo (Ordenados por Total MMR):</h4>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
-                ${teamStats.map(stat => `
-                    <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; text-align: center;">
+                ${teamStats.map((stat, index) => `
+                    <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid ${index === 0 ? '#e74c3c' : index === teamStats.length - 1 ? '#3498db' : '#2ecc71'};">
                         <div style="font-size: 18px; font-weight: bold; color: #ffd700;">Equipo ${stat.team}</div>
                         <div style="margin-top: 10px;">
-                            <div>Total MMR: <strong>${stat.totalMMR}</strong></div>
+                            <div style="font-size: 16px; font-weight: bold; color: ${index === 0 ? '#e74c3c' : index === teamStats.length - 1 ? '#3498db' : '#2ecc71'};">
+                                Total MMR: <strong>${stat.totalMMR}</strong>
+                            </div>
                             <div>Promedio: <strong>${Math.round(stat.averageMMR)}</strong></div>
                             <div>Jugadores: <strong>${stat.players}/5</strong></div>
-                            <div>Diferencia: <strong>${stat.difference}</strong></div>
+                            <div>Desviación: <strong>${stat.difference}</strong></div>
                         </div>
                     </div>
                 `).join('')}
@@ -1253,8 +1424,8 @@ function loadPlayers() {
     }
 }
 
-// Función para asegurar que ningún equipo tenga más de 5 jugadores
-function enforceTeamSizeLimit(teams) {
+// Función para verificar y asegurar que todos los equipos tengan exactamente 5 jugadores
+function enforceExactTeamSize(teams) {
     let hasChanges = true;
     let maxIterations = 10;
     
@@ -1312,6 +1483,970 @@ function enforceTeamSizeLimit(teams) {
     }
     
     if (maxIterations <= 0) {
-        console.log('⚠️ Se alcanzó el límite de iteraciones en enforceTeamSizeLimit');
+        console.log('⚠️ Se alcanzó el límite de iteraciones en enforceExactTeamSize');
     }
 }
+
+// Función para optimización final muy agresiva
+function finalAggressiveOptimization(teams, targetMMR) {
+    console.log('🚀 Iniciando optimización final muy agresiva...');
+    
+    let iterations = 0;
+    const maxIterations = 300; // Aumentar significativamente las iteraciones
+    
+    while (iterations < maxIterations) {
+        iterations++;
+        
+        // Encontrar equipos con mayor y menor MMR total
+        let maxTeamIndex = 0;
+        let minTeamIndex = 0;
+        let maxMMR = -Infinity;
+        let minMMR = Infinity;
+        
+        for (let i = 0; i < teams.length; i++) {
+            if (teams[i].players.length === 5) {
+                if (teams[i].totalMMR > maxMMR) {
+                    maxMMR = teams[i].totalMMR;
+                    maxTeamIndex = i;
+                }
+                if (teams[i].totalMMR < minMMR) {
+                    minMMR = teams[i].totalMMR;
+                    minTeamIndex = i;
+                }
+            }
+        }
+        
+        const currentDifference = maxMMR - minMMR;
+        console.log(`🔥 Iteración ${iterations}: Diferencia = ${currentDifference} (${maxMMR} - ${minMMR})`);
+        
+        // Si la diferencia es muy pequeña, terminar
+        if (currentDifference < 20) {
+            console.log('✅ Diferencia muy pequeña (< 20), optimización final completada');
+            break;
+        }
+        
+        const maxTeam = teams[maxTeamIndex];
+        const minTeam = teams[minTeamIndex];
+        
+        // Buscar cualquier intercambio que mejore el balance
+        let bestSwap = null;
+        let bestImprovement = 0;
+        
+        for (const highPlayer of maxTeam.players) {
+            for (const lowPlayer of minTeam.players) {
+                // Calcular mejora en balance total
+                const newMaxMMR = maxTeam.totalMMR - highPlayer.mmr + lowPlayer.mmr;
+                const newMinMMR = minTeam.totalMMR - lowPlayer.mmr + highPlayer.mmr;
+                
+                const newDifference = Math.abs(newMaxMMR - newMinMMR);
+                const improvement = currentDifference - newDifference;
+                
+                // Solo hacer el intercambio si mejora el balance total (cualquier mejora)
+                if (improvement > 0) { // Cualquier mejora, por pequeña que sea
+                    if (improvement > bestImprovement) {
+                        bestImprovement = improvement;
+                        bestSwap = { highPlayer, lowPlayer, newMaxMMR, newMinMMR };
+                    }
+                }
+            }
+        }
+        
+        if (bestSwap) {
+            const { highPlayer, lowPlayer, newMaxMMR, newMinMMR } = bestSwap;
+            
+            // Encontrar índices
+            const index1 = maxTeam.players.findIndex(p => p.name === highPlayer.name);
+            const index2 = minTeam.players.findIndex(p => p.name === lowPlayer.name);
+            
+            maxTeam.players[index1] = lowPlayer;
+            minTeam.players[index2] = highPlayer;
+            maxTeam.totalMMR = newMaxMMR;
+            minTeam.totalMMR = newMinMMR;
+            
+            // Actualizar roles
+            maxTeam.roles.delete(highPlayer.role);
+            maxTeam.roles.add(lowPlayer.role);
+            minTeam.roles.delete(lowPlayer.role);
+            minTeam.roles.add(highPlayer.role);
+            
+            console.log(`🔥 Intercambio final: ${highPlayer.name} (${highPlayer.mmr}) ↔ ${lowPlayer.name} (${lowPlayer.mmr}) - Mejora: ${bestImprovement}`);
+        } else {
+            console.log('❌ No se encontraron más mejoras en la optimización final');
+            break;
+        }
+    }
+    
+    console.log(`🚀 Optimización final completada en ${iterations} iteraciones`);
+}
+
+// Función para optimización global entre todos los equipos
+function globalTeamOptimization(teams, targetMMR) {
+    console.log('🌍 Iniciando optimización global entre todos los equipos...');
+    
+    let iterations = 0;
+    const maxIterations = 200;
+    
+    while (iterations < maxIterations) {
+        iterations++;
+        
+        // Calcular diferencia actual entre el equipo más fuerte y más débil
+        let maxMMR = -Infinity;
+        let minMMR = Infinity;
+        
+        for (const team of teams) {
+            if (team.players.length === 5) {
+                if (team.totalMMR > maxMMR) maxMMR = team.totalMMR;
+                if (team.totalMMR < minMMR) minMMR = team.totalMMR;
+            }
+        }
+        
+        const currentDifference = maxMMR - minMMR;
+        console.log(`🌍 Iteración ${iterations}: Diferencia global = ${currentDifference}`);
+        
+        if (currentDifference < 30) {
+            console.log('✅ Diferencia global muy pequeña (< 30), optimización global completada');
+            break;
+        }
+        
+        // Buscar el mejor intercambio entre cualquier par de equipos
+        let bestSwap = null;
+        let bestImprovement = 0;
+        
+        for (let i = 0; i < teams.length; i++) {
+            for (let j = i + 1; j < teams.length; j++) {
+                const team1 = teams[i];
+                const team2 = teams[j];
+                
+                if (team1.players.length !== 5 || team2.players.length !== 5) continue;
+                
+                // Probar intercambios entre todos los jugadores de ambos equipos
+                for (const player1 of team1.players) {
+                    for (const player2 of team2.players) {
+                        // Calcular MMR después del intercambio
+                        const newTeam1MMR = team1.totalMMR - player1.mmr + player2.mmr;
+                        const newTeam2MMR = team2.totalMMR - player2.mmr + player1.mmr;
+                        
+                        // Calcular nueva diferencia global
+                        let newMaxMMR = maxMMR;
+                        let newMinMMR = minMMR;
+                        
+                        if (team1.totalMMR === maxMMR) {
+                            newMaxMMR = Math.max(newTeam1MMR, newTeam2MMR, ...teams.filter(t => t !== team1 && t !== team2).map(t => t.totalMMR));
+                        } else if (team2.totalMMR === maxMMR) {
+                            newMaxMMR = Math.max(newTeam1MMR, newTeam2MMR, ...teams.filter(t => t !== team1 && t !== team2).map(t => t.totalMMR));
+                        }
+                        
+                        if (team1.totalMMR === minMMR) {
+                            newMinMMR = Math.min(newTeam1MMR, newTeam2MMR, ...teams.filter(t => t !== team1 && t !== team2).map(t => t.totalMMR));
+                        } else if (team2.totalMMR === minMMR) {
+                            newMinMMR = Math.min(newTeam1MMR, newTeam2MMR, ...teams.filter(t => t !== team1 && t !== team2).map(t => t.totalMMR));
+                        }
+                        
+                        const newDifference = newMaxMMR - newMinMMR;
+                        const improvement = currentDifference - newDifference;
+                        
+                        // Solo considerar mejoras
+                        if (improvement > 0) {
+                            if (improvement > bestImprovement) {
+                                bestImprovement = improvement;
+                                bestSwap = { team1, team2, player1, player2, newTeam1MMR, newTeam2MMR };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (bestSwap) {
+            const { team1, team2, player1, player2, newTeam1MMR, newTeam2MMR } = bestSwap;
+            
+            // Realizar el intercambio
+            const index1 = team1.players.findIndex(p => p.name === player1.name);
+            const index2 = team2.players.findIndex(p => p.name === player2.name);
+            
+            team1.players[index1] = player2;
+            team2.players[index2] = player1;
+            team1.totalMMR = newTeam1MMR;
+            team2.totalMMR = newTeam2MMR;
+            
+            // Actualizar roles
+            team1.roles.delete(player1.role);
+            team1.roles.add(player2.role);
+            team2.roles.delete(player2.role);
+            team2.roles.add(player1.role);
+            
+            console.log(`🌍 Intercambio global: ${player1.name} (${player1.mmr}) ↔ ${player2.name} (${player2.mmr}) - Mejora: ${bestImprovement}`);
+        } else {
+            console.log('❌ No se encontraron más mejoras en la optimización global');
+            break;
+        }
+    }
+    
+    console.log(`🌍 Optimización global completada en ${iterations} iteraciones`);
+}
+
+// Función para optimización matemática avanzada con programación dinámica
+function advancedMathematicalOptimization(teams, targetMMR) {
+    console.log('🧮 Iniciando optimización matemática avanzada...');
+    
+    let iterations = 0;
+    const maxIterations = 1000; // Muchas iteraciones para ser muy persistente
+    
+    while (iterations < maxIterations) {
+        iterations++;
+        
+        // Calcular métricas actuales
+        const currentMetrics = calculateTeamMetrics(teams);
+        console.log(`🧮 Iteración ${iterations}: Diferencia total = ${currentMetrics.totalDifference}, Desviación promedio = ${currentMetrics.avgDeviation.toFixed(2)}`);
+        
+        // Si ya está muy balanceado, terminar
+        if (currentMetrics.totalDifference < 100 && currentMetrics.avgDeviation < 500) {
+            console.log('✅ Equipos muy balanceados, optimización matemática completada');
+            break;
+        }
+        
+        // Encontrar el mejor intercambio usando programación dinámica
+        const bestSwap = findOptimalSwap(teams, currentMetrics);
+        
+        if (bestSwap && bestSwap.improvement > 0) {
+            // Realizar el intercambio
+            performSwap(teams, bestSwap);
+            console.log(`🧮 Intercambio óptimo: ${bestSwap.player1.name} (${bestSwap.player1.mmr}) ↔ ${bestSwap.player2.name} (${bestSwap.player2.mmr}) - Mejora: ${bestSwap.improvement.toFixed(2)}`);
+        } else {
+            console.log('❌ No se encontraron más mejoras en la optimización matemática');
+            break;
+        }
+    }
+    
+    console.log(`🧮 Optimización matemática completada en ${iterations} iteraciones`);
+}
+
+// Función para calcular métricas de todos los equipos
+function calculateTeamMetrics(teams) {
+    const teamMMRs = teams.map(team => team.totalMMR);
+    const teamAverages = teams.map(team => team.players.length > 0 ? team.totalMMR / team.players.length : 0);
+    
+    const maxMMR = Math.max(...teamMMRs);
+    const minMMR = Math.min(...teamMMRs);
+    const totalDifference = maxMMR - minMMR;
+    
+    const avgMMR = teamMMRs.reduce((sum, mmr) => sum + mmr, 0) / teamMMRs.length;
+    const avgDeviation = teamMMRs.reduce((sum, mmr) => sum + Math.abs(mmr - avgMMR), 0) / teamMMRs.length;
+    
+    const maxAvg = Math.max(...teamAverages);
+    const minAvg = Math.min(...teamAverages);
+    const avgDifference = maxAvg - minAvg;
+    
+    return {
+        totalDifference,
+        avgDifference,
+        avgDeviation,
+        maxMMR,
+        minMMR,
+        maxAvg,
+        minAvg,
+        teamMMRs,
+        teamAverages
+    };
+}
+
+// Función para encontrar el intercambio óptimo usando programación dinámica
+function findOptimalSwap(teams, currentMetrics) {
+    let bestSwap = null;
+    let bestScore = -Infinity;
+    
+    // Probar todos los pares de equipos
+    for (let i = 0; i < teams.length; i++) {
+        for (let j = i + 1; j < teams.length; j++) {
+            const team1 = teams[i];
+            const team2 = teams[j];
+            
+            if (team1.players.length !== 5 || team2.players.length !== 5) continue;
+            
+            // Probar todos los pares de jugadores
+            for (const player1 of team1.players) {
+                for (const player2 of team2.players) {
+                    // Simular el intercambio
+                    const newTeam1MMR = team1.totalMMR - player1.mmr + player2.mmr;
+                    const newTeam2MMR = team2.totalMMR - player2.mmr + player1.mmr;
+                    const newTeam1Avg = newTeam1MMR / 5;
+                    const newTeam2Avg = newTeam2MMR / 5;
+                    
+                    // Calcular nuevas métricas
+                    const newTeamMMRs = [...currentMetrics.teamMMRs];
+                    const newTeamAverages = [...currentMetrics.teamAverages];
+                    newTeamMMRs[i] = newTeam1MMR;
+                    newTeamMMRs[j] = newTeam2MMR;
+                    newTeamAverages[i] = newTeam1Avg;
+                    newTeamAverages[j] = newTeam2Avg;
+                    
+                    const newMaxMMR = Math.max(...newTeamMMRs);
+                    const newMinMMR = Math.min(...newTeamMMRs);
+                    const newTotalDifference = newMaxMMR - newMinMMR;
+                    
+                    const newAvgMMR = newTeamMMRs.reduce((sum, mmr) => sum + mmr, 0) / newTeamMMRs.length;
+                    const newAvgDeviation = newTeamMMRs.reduce((sum, mmr) => sum + Math.abs(mmr - newAvgMMR), 0) / newTeamMMRs.length;
+                    
+                    const newMaxAvg = Math.max(...newTeamAverages);
+                    const newMinAvg = Math.min(...newTeamAverages);
+                    const newAvgDifference = newMaxAvg - newMinAvg;
+                    
+                    // Calcular score de mejora (función multi-objetivo)
+                    const totalImprovement = currentMetrics.totalDifference - newTotalDifference;
+                    const avgImprovement = currentMetrics.avgDifference - newAvgDifference;
+                    const deviationImprovement = currentMetrics.avgDeviation - newAvgDeviation;
+                    
+                    // Score ponderado que considera múltiples objetivos
+                    const score = totalImprovement * 2.0 + // Prioridad alta al total MMR
+                                 avgImprovement * 1.5 +    // Prioridad media al promedio
+                                 deviationImprovement * 1.0; // Prioridad baja a la desviación
+                    
+                    // Solo considerar mejoras significativas
+                    if (score > 0 && score > bestScore) {
+                        bestScore = score;
+                        bestSwap = {
+                            team1: team1,
+                            team2: team2,
+                            player1: player1,
+                            player2: player2,
+                            newTeam1MMR: newTeam1MMR,
+                            newTeam2MMR: newTeam2MMR,
+                            improvement: score,
+                            totalImprovement: totalImprovement,
+                            avgImprovement: avgImprovement,
+                            deviationImprovement: deviationImprovement
+                        };
+                    }
+                }
+            }
+        }
+    }
+    
+    return bestSwap;
+}
+
+// Función para realizar un intercambio
+function performSwap(teams, swap) {
+    const { team1, team2, player1, player2, newTeam1MMR, newTeam2MMR } = swap;
+    
+    // Encontrar índices de los jugadores
+    const index1 = team1.players.findIndex(p => p.name === player1.name);
+    const index2 = team2.players.findIndex(p => p.name === player2.name);
+    
+    // Realizar el intercambio
+    team1.players[index1] = player2;
+    team2.players[index2] = player1;
+    team1.totalMMR = newTeam1MMR;
+    team2.totalMMR = newTeam2MMR;
+    
+    // Actualizar roles
+    team1.roles.delete(player1.role);
+    team1.roles.add(player2.role);
+    team2.roles.delete(player2.role);
+    team2.roles.add(player1.role);
+}
+
+// Algoritmo de Simulated Annealing para optimización final
+function simulatedAnnealingOptimization(teams, targetMMR) {
+    console.log('❄️ Iniciando optimización con Simulated Annealing...');
+    
+    // Parámetros del algoritmo
+    const initialTemperature = 1000;
+    const coolingRate = 0.95;
+    const minTemperature = 0.1;
+    const iterationsPerTemperature = 50;
+    
+    let temperature = initialTemperature;
+    let currentMetrics = calculateTeamMetrics(teams);
+    let bestMetrics = { ...currentMetrics };
+    let bestTeams = deepCopyTeams(teams);
+    
+    let totalIterations = 0;
+    const maxTotalIterations = 2000;
+    
+    while (temperature > minTemperature && totalIterations < maxTotalIterations) {
+        for (let i = 0; i < iterationsPerTemperature; i++) {
+            totalIterations++;
+            
+            // Generar un intercambio aleatorio
+            const randomSwap = generateRandomSwap(teams);
+            if (!randomSwap) continue;
+            
+            // Simular el intercambio
+            const newTeams = simulateSwap(teams, randomSwap);
+            const newMetrics = calculateTeamMetrics(newTeams);
+            
+            // Calcular la diferencia de energía (score)
+            const currentScore = calculateOptimizationScore(currentMetrics);
+            const newScore = calculateOptimizationScore(newMetrics);
+            const deltaE = newScore - currentScore;
+            
+            // Criterio de aceptación
+            if (deltaE > 0 || Math.random() < Math.exp(deltaE / temperature)) {
+                // Aceptar el intercambio
+                performSwap(teams, randomSwap);
+                currentMetrics = newMetrics;
+                
+                // Actualizar el mejor resultado encontrado
+                if (newScore > calculateOptimizationScore(bestMetrics)) {
+                    bestMetrics = { ...newMetrics };
+                    bestTeams = deepCopyTeams(teams);
+                    console.log(`❄️ Nuevo mejor resultado: Diferencia total = ${bestMetrics.totalDifference}, Score = ${newScore.toFixed(2)}`);
+                }
+            }
+        }
+        
+        // Enfriar el sistema
+        temperature *= coolingRate;
+        
+        if (totalIterations % 500 === 0) {
+            console.log(`❄️ Iteración ${totalIterations}: Temperatura = ${temperature.toFixed(2)}, Diferencia actual = ${currentMetrics.totalDifference}`);
+        }
+    }
+    
+    // Restaurar el mejor resultado encontrado
+    if (calculateOptimizationScore(bestMetrics) > calculateOptimizationScore(calculateTeamMetrics(teams))) {
+        // Copiar el mejor resultado de vuelta a teams
+        for (let i = 0; i < teams.length; i++) {
+            teams[i].players = [...bestTeams[i].players];
+            teams[i].totalMMR = bestTeams[i].totalMMR;
+            teams[i].roles = new Set(Array.from(bestTeams[i].roles));
+        }
+        console.log('❄️ Restaurando el mejor resultado encontrado');
+    }
+    
+    console.log(`❄️ Simulated Annealing completado en ${totalIterations} iteraciones`);
+}
+
+// Función para generar un intercambio aleatorio
+function generateRandomSwap(teams) {
+    const validTeams = teams.filter(team => team.players.length === 5);
+    if (validTeams.length < 2) return null;
+    
+    const team1 = validTeams[Math.floor(Math.random() * validTeams.length)];
+    const team2 = validTeams[Math.floor(Math.random() * validTeams.length)];
+    
+    if (team1 === team2) return null;
+    
+    const player1 = team1.players[Math.floor(Math.random() * team1.players.length)];
+    const player2 = team2.players[Math.floor(Math.random() * team2.players.length)];
+    
+    return {
+        team1: team1,
+        team2: team2,
+        player1: player1,
+        player2: player2,
+        newTeam1MMR: team1.totalMMR - player1.mmr + player2.mmr,
+        newTeam2MMR: team2.totalMMR - player2.mmr + player1.mmr
+    };
+}
+
+// Función para simular un intercambio sin realizarlo
+function simulateSwap(teams, swap) {
+    const newTeams = deepCopyTeams(teams);
+    const team1Index = newTeams.findIndex(t => t.totalMMR === swap.team1.totalMMR && t.players.length === swap.team1.players.length);
+    const team2Index = newTeams.findIndex(t => t.totalMMR === swap.team2.totalMMR && t.players.length === swap.team2.players.length);
+    
+    if (team1Index === -1 || team2Index === -1) return teams;
+    
+    newTeams[team1Index].totalMMR = swap.newTeam1MMR;
+    newTeams[team2Index].totalMMR = swap.newTeam2MMR;
+    
+    return newTeams;
+}
+
+// Función para calcular el score de optimización
+function calculateOptimizationScore(metrics) {
+    // Score inverso (menor es mejor)
+    const totalScore = 10000 - metrics.totalDifference * 2;
+    const avgScore = 5000 - metrics.avgDifference * 10;
+    const deviationScore = 2000 - metrics.avgDeviation * 0.5;
+    
+    return totalScore + avgScore + deviationScore;
+}
+
+// Función para hacer deep copy de equipos
+function deepCopyTeams(teams) {
+    return teams.map(team => ({
+        players: [...team.players],
+        totalMMR: team.totalMMR,
+        roles: new Set(Array.from(team.roles))
+    }));
+}
+
+// Función principal de optimización con múltiples estrategias
+function optimizeTeams(teams, targetMMR) {
+    console.log("🚀 Iniciando optimización agresiva con múltiples estrategias...");
+    
+    let bestTeams = deepCopyTeams(teams);
+    let bestScore = calculateTotalBalanceScore(bestTeams, targetMMR);
+    let iterations = 0;
+    const maxIterations = 2000; // Aumentar significativamente las iteraciones
+    let noImprovementCount = 0;
+    const maxNoImprovement = 500; // Más persistencia
+    
+    console.log(`📊 Score inicial: ${bestScore.toFixed(2)}`);
+    
+    // Estrategia 1: Optimización agresiva con intercambios múltiples
+    console.log("🔄 Estrategia 1: Optimización agresiva con intercambios múltiples");
+    for (let i = 0; i < maxIterations && noImprovementCount < maxNoImprovement; i++) {
+        iterations++;
+        
+        // Intercambios entre múltiples equipos (no solo 2)
+        const numTeams = teams.length;
+        const team1 = Math.floor(Math.random() * numTeams);
+        const team2 = Math.floor(Math.random() * numTeams);
+        const team3 = Math.floor(Math.random() * numTeams);
+        
+        if (team1 !== team2 && team2 !== team3 && team1 !== team3) {
+            const currentTeams = deepCopyTeams(bestTeams);
+            
+            // Intercambio triple
+            if (currentTeams[team1].players.length > 0 && 
+                currentTeams[team2].players.length > 0 && 
+                currentTeams[team3].players.length > 0) {
+                
+                const player1 = currentTeams[team1].players[Math.floor(Math.random() * currentTeams[team1].players.length)];
+                const player2 = currentTeams[team2].players[Math.floor(Math.random() * currentTeams[team2].players.length)];
+                const player3 = currentTeams[team3].players[Math.floor(Math.random() * currentTeams[team3].players.length)];
+                
+                // Rotación triple
+                removePlayerFromTeam(currentTeams[team1], player1);
+                removePlayerFromTeam(currentTeams[team2], player2);
+                removePlayerFromTeam(currentTeams[team3], player3);
+                
+                addPlayerToTeam(currentTeams[team2], player1);
+                addPlayerToTeam(currentTeams[team3], player2);
+                addPlayerToTeam(currentTeams[team1], player3);
+                
+                updateTeamStats(currentTeams[team1]);
+                updateTeamStats(currentTeams[team2]);
+                updateTeamStats(currentTeams[team3]);
+                
+                const newScore = calculateTotalBalanceScore(currentTeams, targetMMR);
+                
+                if (newScore > bestScore) {
+                    bestScore = newScore;
+                    bestTeams = deepCopyTeams(currentTeams);
+                    noImprovementCount = 0;
+                    console.log(`✅ Mejora encontrada en iteración ${i}: ${newScore.toFixed(2)}`);
+                } else {
+                    noImprovementCount++;
+                }
+            }
+        }
+        
+        // Intercambios simples más agresivos
+        if (i % 10 === 0) {
+            const currentTeams = deepCopyTeams(bestTeams);
+            const team1 = Math.floor(Math.random() * numTeams);
+            const team2 = Math.floor(Math.random() * numTeams);
+            
+            if (team1 !== team2 && 
+                currentTeams[team1].players.length > 0 && 
+                currentTeams[team2].players.length > 0) {
+                
+                const player1 = currentTeams[team1].players[Math.floor(Math.random() * currentTeams[team1].players.length)];
+                const player2 = currentTeams[team2].players[Math.floor(Math.random() * currentTeams[team2].players.length)];
+                
+                // Intercambio directo
+                removePlayerFromTeam(currentTeams[team1], player1);
+                removePlayerFromTeam(currentTeams[team2], player2);
+                
+                addPlayerToTeam(currentTeams[team1], player2);
+                addPlayerToTeam(currentTeams[team2], player1);
+                
+                updateTeamStats(currentTeams[team1]);
+                updateTeamStats(currentTeams[team2]);
+                
+                const newScore = calculateTotalBalanceScore(currentTeams, targetMMR);
+                
+                if (newScore > bestScore) {
+                    bestScore = newScore;
+                    bestTeams = deepCopyTeams(currentTeams);
+                    noImprovementCount = 0;
+                    console.log(`✅ Mejora encontrada en iteración ${i}: ${newScore.toFixed(2)}`);
+                }
+            }
+        }
+    }
+    
+    console.log(`📊 Después de Estrategia 1: ${bestScore.toFixed(2)} (${iterations} iteraciones)`);
+    
+    // Estrategia 2: Simulated Annealing más agresivo
+    console.log("🔥 Estrategia 2: Simulated Annealing agresivo");
+    let temperature = 1000;
+    const coolingRate = 0.95;
+    const minTemperature = 0.1;
+    
+    for (let i = 0; i < 1000 && temperature > minTemperature; i++) {
+        const currentTeams = deepCopyTeams(bestTeams);
+        const team1 = Math.floor(Math.random() * teams.length);
+        const team2 = Math.floor(Math.random() * teams.length);
+        
+        if (team1 !== team2 && 
+            currentTeams[team1].players.length > 0 && 
+            currentTeams[team2].players.length > 0) {
+            
+            const player1 = currentTeams[team1].players[Math.floor(Math.random() * currentTeams[team1].players.length)];
+            const player2 = currentTeams[team2].players[Math.floor(Math.random() * currentTeams[team2].players.length)];
+            
+            // Intercambio
+            removePlayerFromTeam(currentTeams[team1], player1);
+            removePlayerFromTeam(currentTeams[team2], player2);
+            
+            addPlayerToTeam(currentTeams[team1], player2);
+            addPlayerToTeam(currentTeams[team2], player1);
+            
+            updateTeamStats(currentTeams[team1]);
+            updateTeamStats(currentTeams[team2]);
+            
+            const newScore = calculateTotalBalanceScore(currentTeams, targetMMR);
+            const scoreDifference = newScore - bestScore;
+            
+            // Aceptar mejoras o peores soluciones con probabilidad
+            if (scoreDifference > 0 || Math.random() < Math.exp(scoreDifference / temperature)) {
+                bestScore = newScore;
+                bestTeams = deepCopyTeams(currentTeams);
+                console.log(`🔥 SA mejora en iteración ${i}: ${newScore.toFixed(2)} (temp: ${temperature.toFixed(2)})`);
+            }
+        }
+        
+        temperature *= coolingRate;
+    }
+    
+    console.log(`📊 Después de Estrategia 2: ${bestScore.toFixed(2)}`);
+    
+    // Estrategia 3: Optimización específica para MMR alto-bajo
+    console.log("⚖️ Estrategia 3: Optimización específica para MMR alto-bajo");
+    for (let i = 0; i < 500; i++) {
+        const currentTeams = deepCopyTeams(bestTeams);
+        
+        // Buscar equipos con MMR muy alto y muy bajo
+        const highMMRTeams = currentTeams.filter(team => {
+            const maxMMR = Math.max(...team.players.map(p => p.mmr));
+            return maxMMR >= 7000;
+        });
+        
+        const lowMMRTeams = currentTeams.filter(team => {
+            const minMMR = Math.min(...team.players.map(p => p.mmr));
+            return minMMR <= 2000;
+        });
+        
+        if (highMMRTeams.length > 0 && lowMMRTeams.length > 0) {
+            const highTeam = highMMRTeams[Math.floor(Math.random() * highMMRTeams.length)];
+            const lowTeam = lowMMRTeams[Math.floor(Math.random() * lowMMRTeams.length)];
+            
+            // Encontrar jugadores de MMR extremo
+            const highPlayer = highTeam.players.find(p => p.mmr >= 7000);
+            const lowPlayer = lowTeam.players.find(p => p.mmr <= 2000);
+            
+            if (highPlayer && lowPlayer) {
+                // Intercambiar jugadores extremos
+                removePlayerFromTeam(highTeam, highPlayer);
+                removePlayerFromTeam(lowTeam, lowPlayer);
+                
+                addPlayerToTeam(highTeam, lowPlayer);
+                addPlayerToTeam(lowTeam, highPlayer);
+                
+                updateTeamStats(highTeam);
+                updateTeamStats(lowTeam);
+                
+                const newScore = calculateTotalBalanceScore(currentTeams, targetMMR);
+                
+                if (newScore > bestScore) {
+                    bestScore = newScore;
+                    bestTeams = deepCopyTeams(currentTeams);
+                    console.log(`⚖️ Mejora MMR alto-bajo en iteración ${i}: ${newScore.toFixed(2)}`);
+                }
+            }
+        }
+    }
+    
+    console.log(`📊 Después de Estrategia 3: ${bestScore.toFixed(2)}`);
+    
+    // Estrategia 4: Optimización final con intercambios múltiples
+    console.log("🎯 Estrategia 4: Optimización final agresiva");
+    for (let i = 0; i < 1000; i++) {
+        const currentTeams = deepCopyTeams(bestTeams);
+        
+        // Intercambios múltiples entre varios equipos
+        const numSwaps = Math.floor(Math.random() * 4) + 2; // 2-5 intercambios
+        
+        for (let j = 0; j < numSwaps; j++) {
+            const team1 = Math.floor(Math.random() * teams.length);
+            const team2 = Math.floor(Math.random() * teams.length);
+            
+            if (team1 !== team2 && 
+                currentTeams[team1].players.length > 0 && 
+                currentTeams[team2].players.length > 0) {
+                
+                const player1 = currentTeams[team1].players[Math.floor(Math.random() * currentTeams[team1].players.length)];
+                const player2 = currentTeams[team2].players[Math.floor(Math.random() * currentTeams[team2].players.length)];
+                
+                removePlayerFromTeam(currentTeams[team1], player1);
+                removePlayerFromTeam(currentTeams[team2], player2);
+                
+                addPlayerToTeam(currentTeams[team1], player2);
+                addPlayerToTeam(currentTeams[team2], player1);
+                
+                updateTeamStats(currentTeams[team1]);
+                updateTeamStats(currentTeams[team2]);
+            }
+        }
+        
+        const newScore = calculateTotalBalanceScore(currentTeams, targetMMR);
+        
+        if (newScore > bestScore) {
+            bestScore = newScore;
+            bestTeams = deepCopyTeams(currentTeams);
+            console.log(`🎯 Mejora final en iteración ${i}: ${newScore.toFixed(2)}`);
+        }
+    }
+    
+    console.log(`🏆 Score final después de todas las estrategias: ${bestScore.toFixed(2)}`);
+    console.log(`📈 Total de iteraciones realizadas: ${iterations + 2500}`);
+    
+    return bestTeams;
+}
+
+// Función para calcular el score total de balance de todos los equipos
+function calculateTotalBalanceScore(teams, targetMMR) {
+    let totalScore = 0;
+    
+    // Calcular score individual de cada equipo
+    teams.forEach(team => {
+        totalScore += calculateTeamBalanceScore(team, targetMMR);
+    });
+    
+    // Bonus por distribución global de MMR
+    const allMMRs = teams.flatMap(team => team.players.map(p => p.mmr));
+    const globalAvgMMR = allMMRs.reduce((sum, mmr) => sum + mmr, 0) / allMMRs.length;
+    
+    // Penalización por diferencia total entre equipos
+    const teamTotals = teams.map(team => team.totalMMR);
+    const maxTotal = Math.max(...teamTotals);
+    const minTotal = Math.min(...teamTotals);
+    const totalDifference = maxTotal - minTotal;
+    
+    // Penalización muy severa por diferencias grandes
+    totalScore -= totalDifference * 10.0;
+    
+    // Bonus por equipos con MMR alto-bajo juntos
+    teams.forEach(team => {
+        if (team.players.length === 5) {
+            const mmrs = team.players.map(p => p.mmr);
+            const maxMMR = Math.max(...mmrs);
+            const minMMR = Math.min(...mmrs);
+            
+            if (maxMMR >= 7000 && minMMR <= 2000) {
+                totalScore += 10000; // Bonus muy alto
+            } else if (maxMMR >= 6000 && minMMR <= 3000) {
+                totalScore += 5000; // Bonus alto
+            } else if (maxMMR >= 5000 && minMMR <= 4000) {
+                totalScore += 2000; // Bonus moderado
+            }
+        }
+    });
+    
+    return totalScore;
+}
+
+// Función para remover un jugador de un equipo
+function removePlayerFromTeam(team, player) {
+    const index = team.players.findIndex(p => 
+        p.name === player.name && 
+        p.mmr === player.mmr && 
+        p.role === player.role
+    );
+    
+    if (index !== -1) {
+        const removedPlayer = team.players.splice(index, 1)[0];
+        team.totalMMR -= removedPlayer.mmr;
+        team.roles.delete(removedPlayer.role);
+    }
+}
+
+// Función para agregar un jugador a un equipo
+function addPlayerToTeam(team, player) {
+    team.players.push(player);
+    team.totalMMR += player.mmr;
+    team.roles.add(player.role);
+}
+
+// Función para actualizar estadísticas de un equipo
+function updateTeamStats(team) {
+    if (team.players.length === 0) {
+        team.totalMMR = 0;
+        team.roles.clear();
+        return;
+    }
+    
+    team.totalMMR = team.players.reduce((sum, player) => sum + player.mmr, 0);
+    team.roles.clear();
+    team.players.forEach(player => team.roles.add(player.role));
+}
+
+// Algoritmo de balanceo por ELO (matchmaking MOBA)
+function eloBalanceTeams() {
+    if (players.length < 5) {
+        alert('Se necesitan al menos 5 jugadores para formar equipos');
+        return;
+    }
+    const numTeams = Math.floor(players.length / 5);
+    if (numTeams < 2) {
+        alert('Se necesitan al menos 10 jugadores para balancear por ELO');
+        return;
+    }
+    
+    console.log("🎯 Iniciando balanceo ELO con roles y balance total MMR...");
+    
+    // Separar jugadores por roles
+    const playersByRole = {
+        1: players.filter(p => p.role === 1), // Carry
+        2: players.filter(p => p.role === 2), // Mid
+        3: players.filter(p => p.role === 3), // Offlane
+        4: players.filter(p => p.role === 4), // Soft Support
+        5: players.filter(p => p.role === 5)  // Hard Support
+    };
+    
+    let bestTeams = [];
+    let bestScore = Infinity;
+    let progressCount = 0;
+    
+    for (let attempt = 0; attempt < 1000500; attempt++) {
+        progressCount++;
+        if (progressCount % 100000 === 0) {
+            console.log(`📊 Progreso: ${progressCount}/${1000500} intentos (${Math.round(progressCount/1000500*100)}%)`);
+        }
+        
+        // Crear equipos vacíos
+        let teams = [];
+        for (let i = 0; i < numTeams; i++) {
+            teams.push({ players: [], totalMMR: 0, roles: new Set() });
+        }
+        
+        // Asignar jugadores por roles (1 por equipo por rol)
+        const roles = [1, 2, 3, 4, 5]; // Carry, Mid, Offlane, Soft Support, Hard Support
+        
+        for (const role of roles) {
+            const rolePlayers = [...playersByRole[role]]; // Copia para no modificar original
+            
+            // Mezclar jugadores de este rol
+            rolePlayers.sort(() => Math.random() - 0.5);
+            
+            // Asignar un jugador de este rol a cada equipo
+            for (let teamIdx = 0; teamIdx < numTeams && teamIdx < rolePlayers.length; teamIdx++) {
+                const player = rolePlayers[teamIdx];
+                teams[teamIdx].players.push(player);
+                teams[teamIdx].totalMMR += player.mmr;
+                teams[teamIdx].roles.add(player.role);
+            }
+            
+            // Si sobran jugadores de este rol, asignarlos aleatoriamente
+            for (let i = numTeams; i < rolePlayers.length; i++) {
+                const randomTeam = Math.floor(Math.random() * numTeams);
+                teams[randomTeam].players.push(rolePlayers[i]);
+                teams[randomTeam].totalMMR += rolePlayers[i].mmr;
+                teams[randomTeam].roles.add(rolePlayers[i].role);
+            }
+        }
+        
+        // Verificar que todos los equipos tengan exactamente 5 jugadores
+        if (teams.every(team => team.players.length === 5)) {
+            const score = calculateEloMatchmakingScore(teams);
+            if (score < bestScore) {
+                bestScore = score;
+                bestTeams = JSON.parse(JSON.stringify(teams));
+                console.log(`✅ Nueva mejor combinación encontrada en intento ${attempt}: Score ${bestScore.toFixed(2)}`);
+            }
+        }
+    }
+    
+    // Asignar equipos globales
+    teams = bestTeams.map(team => ({
+        players: team.players,
+        totalMMR: team.players.reduce((sum, p) => sum + p.mmr, 0),
+        roles: new Set(team.players.map(p => p.role))
+    }));
+    
+    displayTeams();
+    updateStats();
+    
+    console.log(`🏆 Balanceo ELO completado. Mejor score: ${bestScore.toFixed(2)}`);
+    alert(`Balanceo por ELO completado.\nMejor score encontrado: ${bestScore.toFixed(2)}\nTotal de intentos: ${progressCount}`);
+}
+
+// Score ELO mejorado que prioriza balance total MMR y respeta roles
+function calculateEloMatchmakingScore(teams) {
+    let score = 0;
+    
+    // 1. PRIORIDAD PRINCIPAL: Balance del total MMR entre equipos
+    const teamTotals = teams.map(team => team.totalMMR);
+    const maxTotal = Math.max(...teamTotals);
+    const minTotal = Math.min(...teamTotals);
+    const totalDifference = maxTotal - minTotal;
+    
+    // Penalización muy severa por diferencias grandes en total MMR
+    score += totalDifference * 15.0; // Peso muy alto para total MMR
+    
+    // 2. PRIORIDAD SECUNDARIA: Probabilidad de victoria usando ELO
+    let eloImbalance = 0;
+    for (let i = 0; i < teams.length; i++) {
+        for (let j = i + 1; j < teams.length; j++) {
+            const mmrA = teams[i].totalMMR;
+            const mmrB = teams[j].totalMMR;
+            // Fórmula ELO para probabilidad de victoria
+            const pA = 1 / (1 + Math.pow(10, (mmrB - mmrA) / 400));
+            // Penalizar desviaciones del 50% (equilibrio perfecto)
+            eloImbalance += Math.abs(0.5 - pA);
+        }
+    }
+    score += eloImbalance * 5000; // Peso moderado para ELO
+    
+    // 3. BONUS por roles únicos (cada equipo debe tener 5 roles diferentes)
+    for (const team of teams) {
+        if (team.roles.size === 5) {
+            score -= 1000; // Bonus por equipo con roles únicos
+        } else {
+            score += (5 - team.roles.size) * 2000; // Penalización por roles faltantes
+        }
+    }
+    
+    // 4. Penalización por "stacking" de jugadores extremos
+    for (const team of teams) {
+        const mmrs = team.players.map(p => p.mmr);
+        const superHigh = mmrs.filter(mmr => mmr > 7000).length;
+        const superLow = mmrs.filter(mmr => mmr < 2000).length;
+        
+        // Penalizar equipos con múltiples superestrellas
+        if (superHigh > 1) {
+            score += 8000 * (superHigh - 1);
+        }
+        
+        // Penalizar equipos con muchos jugadores muy bajos
+        if (superLow > 2) {
+            score += 4000 * (superLow - 2);
+        }
+    }
+    
+    // 5. Bonus por distribución uniforme de MMR
+    const allMMRs = teams.flatMap(team => team.players.map(p => p.mmr));
+    const globalAvg = allMMRs.reduce((sum, mmr) => sum + mmr, 0) / allMMRs.length;
+    
+    for (const team of teams) {
+        const teamAvg = team.totalMMR / 5;
+        const deviation = Math.abs(teamAvg - globalAvg);
+        score += deviation * 0.1; // Peso bajo para promedio
+    }
+    
+    return score;
+}
+
+// Event listener para el botón de balanceo ELO
+window.addEventListener('DOMContentLoaded', () => {
+    const eloBtn = document.getElementById('eloBalanceBtn');
+    if (eloBtn) {
+        eloBtn.onclick = eloBalanceTeams;
+    }
+});

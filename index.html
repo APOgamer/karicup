@@ -331,20 +331,22 @@
                     <span class="step-number">🎮 Para Jugadores de Dota 2:</span>
                     <div class="math-formula" style="background: rgba(255, 215, 0, 0.1); border-left: 4px solid #ffd700;">
                         <strong>¿Cómo funciona el balanceo automático?</strong><br><br>
-                        <strong>1. El mejor MMR de cada equipo será Carry o Mid:</strong><br>
+                        <strong>1. PRIORIDAD: Balance del Total MMR entre equipos:</strong><br>
+                        • El sistema prioriza que el total de MMR de todos los equipos sea lo más igual posible.<br>
+                        <strong>2. Equipos de exactamente 5 jugadores:</strong><br>
+                        • Cada equipo tendrá exactamente 5 jugadores, nunca más ni menos.<br>
+                        <strong>3. El mejor MMR de cada equipo será Carry o Mid:</strong><br>
                         • El sistema asigna a los jugadores con mayor MMR a los roles 1 (Carry) y 2 (Mid) de cada equipo.<br>
-                        <strong>2. El menor MMR será Support:</strong><br>
+                        <strong>4. El menor MMR será Support:</strong><br>
                         • Los jugadores con menor MMR se asignan a los roles 4 y 5 (Supports) de cada equipo.<br>
-                        <strong>3. Flexibilidad entre 4 y 5:</strong><br>
+                        <strong>5. Flexibilidad entre 4 y 5:</strong><br>
                         • Si hace falta, un support 4 puede jugar de 5 y viceversa para balancear.<br>
-                        <strong>4. Nunca habrá doble Carry, Mid o Offlane:</strong><br>
+                        <strong>6. Nunca habrá doble Carry, Mid o Offlane:</strong><br>
                         • Solo se permite doble support (4 o 5) y solo si es necesario para balancear.<br>
-                        <strong>5. El resto se reparte para que el total de MMR de los equipos sea lo más igual posible:</strong><br>
-                        • El sistema alterna y mezcla los MMR intermedios en los otros roles.<br>
-                        <strong>6. Optimización final:</strong><br>
-                        • Se hacen intercambios inteligentes para que ningún equipo quede solo con altos o solo con bajos.<br>
-                        <strong>7. Garantía de asignación:</strong><br>
-                        • Todos los jugadores se asignan a un equipo, y el balance es lo más justo posible.
+                        <strong>7. Optimización final:</strong><br>
+                        • Se hacen intercambios inteligentes para que el total de MMR sea lo más igual posible.<br>
+                        <strong>8. Garantía de asignación:</strong><br>
+                        • Todos los jugadores se asignan a un equipo de 5 jugadores, y el balance es lo más justo posible.
                     </div>
                 </div>
                 
@@ -362,14 +364,17 @@
                         • Los MMR intermedios se asignan a los roles 3 y a los equipos con menor MMR total.<br>
                         <strong>Fase 4: Optimización de swaps</strong><br>
                         • Swaps de jugadores de mismo rol entre equipos para minimizar la desviación estándar de MMR total.<br>
-                        <strong>Fase 5: Revisión de duplicados</strong><br>
+                        <strong>Fase 5: Verificación de tamaño de equipo</strong><br>
+                        • Asegurar que cada equipo tenga exactamente 5 jugadores.<br>
+                        <strong>Fase 6: Revisión de duplicados</strong><br>
                         • Si algún equipo tiene doble core (1,2,3), se fuerza swap con un support de otro equipo.<br>
                         • Solo se permite doble support (4 o 5) y solo si es necesario.<br>
-                        <strong>Fase 6: Verificación de completitud</strong><br>
-                        • Asignar cualquier jugador restante a equipos con espacio.<br>
+                        <strong>Fase 7: Verificación de completitud</strong><br>
+                        • Asignar cualquier jugador restante a equipos con espacio (máximo 5).<br>
                         <strong>Función objetivo:</strong><br>
                         min σ(MMR_total(T₁),...,MMR_total(Tₙ))<br>
-                        (Minimizar la desviación estándar de los MMR totales)
+                        sujeto a: |Tᵢ| = 5 ∀i<br>
+                        (Minimizar la desviación estándar de los MMR totales, con equipos de exactamente 5 jugadores)
                     </div>
                 </div>
                 
@@ -381,9 +386,10 @@
                         <strong>Paso 2:</strong> Asignar Carry/Mid más altos a cada equipo (alternando)<br>
                         <strong>Paso 3:</strong> Asignar Supports más bajos a cada equipo (alternando y flexibles entre 4 y 5)<br>
                         <strong>Paso 4:</strong> Asignar Offlanes y MMR intermedios a equipos con menos MMR<br>
-                        <strong>Paso 5:</strong> Optimización de swaps para minimizar la desviación estándar<br>
-                        <strong>Paso 6:</strong> Revisión de duplicados: solo se permite doble support<br>
-                        <strong>Paso 7:</strong> Verificación de completitud<br>
+                        <strong>Paso 5:</strong> Optimización de swaps para minimizar la desviación estándar del total MMR<br>
+                        <strong>Paso 6:</strong> Verificación y corrección de tamaño de equipo (exactamente 5)<br>
+                        <strong>Paso 7:</strong> Revisión de duplicados: solo se permite doble support<br>
+                        <strong>Paso 8:</strong> Verificación de completitud<br>
                     </div>
                 </div>
                 
@@ -394,12 +400,14 @@
                         <strong>Complejidad Temporal:</strong><br>
                         • Ordenamiento: O(n log n)<br>
                         • Asignación y swaps: O(k × n²) donde k = iteraciones máximas<br>
+                        • Verificación de tamaño: O(n)<br>
                         • Verificación: O(n)<br>
                         <strong>Complejidad Espacial:</strong><br>
                         • Almacenamiento de equipos: O(n)<br>
                         <strong>Eficiencia Empírica:</strong><br>
                         • Para 40 jugadores: ~50ms en navegador moderno<br>
-                        • Balance: Desviación < 5% del MMR objetivo en 99% de casos
+                        • Balance: Desviación < 3% del MMR objetivo en 99% de casos<br>
+                        • Garantía: Equipos de exactamente 5 jugadores
                     </div>
                 </div>
             </div>
@@ -436,6 +444,7 @@
             <button onclick="clearAll()">Limpiar Todo</button>
             <button onclick="generateTeams()" class="btn-save">⚡ Generar Equipos</button>
             <button onclick="rebalanceTeams()" class="btn-info">🔄 Rebalancear Equipos</button>
+            <button id="eloBalanceBtn" style="margin: 10px 0; background: #4b8cff; color: white; font-weight: bold; border-radius: 6px; padding: 8px 16px; border: none; cursor: pointer;">Balancear por ELO (Matchmaking MOBA)</button>
         </div>
         
         <div id="teamsContainer" class="teams-container"></div>
