@@ -2299,15 +2299,15 @@ function eloBalanceTeams() {
         return;
     }
     
-    console.log("🎯 Iniciando balanceo ELO con roles y balance total MMR...");
+    console.log("🎯 Iniciando balanceo ELO con roles únicos y balance total MMR...");
     
-    // Separar jugadores por roles
+    // Separar jugadores por roles y ordenar por MMR (descendente)
     const playersByRole = {
-        1: players.filter(p => p.role === 1), // Carry
-        2: players.filter(p => p.role === 2), // Mid
-        3: players.filter(p => p.role === 3), // Offlane
-        4: players.filter(p => p.role === 4), // Soft Support
-        5: players.filter(p => p.role === 5)  // Hard Support
+        1: players.filter(p => p.role === 1).sort((a, b) => b.mmr - a.mmr), // Carry
+        2: players.filter(p => p.role === 2).sort((a, b) => b.mmr - a.mmr), // Mid
+        3: players.filter(p => p.role === 3).sort((a, b) => b.mmr - a.mmr), // Offlane
+        4: players.filter(p => p.role === 4).sort((a, b) => b.mmr - a.mmr), // Soft Support
+        5: players.filter(p => p.role === 5).sort((a, b) => b.mmr - a.mmr)  // Hard Support
     };
     
     let bestTeams = [];
@@ -2326,29 +2326,56 @@ function eloBalanceTeams() {
             teams.push({ players: [], totalMMR: 0, roles: new Set() });
         }
         
-        // Asignar jugadores por roles (1 por equipo por rol)
-        const roles = [1, 2, 3, 4, 5]; // Carry, Mid, Offlane, Soft Support, Hard Support
+        // Crear copias de los arrays de roles para no modificar los originales
+        const availablePlayers = {
+            1: [...playersByRole[1]],
+            2: [...playersByRole[2]],
+            3: [...playersByRole[3]],
+            4: [...playersByRole[4]],
+            5: [...playersByRole[5]]
+        };
+        
+        // FASE 1: Intentar asignar un jugador de cada rol a cada equipo
+        const roles = [1, 2, 3, 4, 5];
         
         for (const role of roles) {
-            const rolePlayers = [...playersByRole[role]]; // Copia para no modificar original
+            // Mezclar el orden de asignación de equipos para este rol
+            const teamOrder = Array.from({length: numTeams}, (_, i) => i);
+            teamOrder.sort(() => Math.random() - 0.5);
             
-            // Mezclar jugadores de este rol
-            rolePlayers.sort(() => Math.random() - 0.5);
-            
-            // Asignar un jugador de este rol a cada equipo
-            for (let teamIdx = 0; teamIdx < numTeams && teamIdx < rolePlayers.length; teamIdx++) {
-                const player = rolePlayers[teamIdx];
-                teams[teamIdx].players.push(player);
-                teams[teamIdx].totalMMR += player.mmr;
-                teams[teamIdx].roles.add(player.role);
+            for (const teamIdx of teamOrder) {
+                if (availablePlayers[role].length > 0 && teams[teamIdx].players.length < 5) {
+                    const player = availablePlayers[role].shift(); // Toma el de MMR más alto
+                    teams[teamIdx].players.push(player);
+                    teams[teamIdx].totalMMR += player.mmr;
+                    teams[teamIdx].roles.add(player.role);
+                }
+            }
+        }
+        
+        // FASE 2: Completar equipos con jugadores restantes (priorizando MMR alto)
+        const remainingPlayers = [];
+        for (const role of roles) {
+            remainingPlayers.push(...availablePlayers[role]);
+        }
+        
+        // Ordenar jugadores restantes por MMR (descendente)
+        remainingPlayers.sort((a, b) => b.mmr - a.mmr);
+        
+        // Asignar jugadores restantes a equipos incompletos
+        for (const player of remainingPlayers) {
+            // Encontrar equipo con menos jugadores
+            let targetTeam = teams[0];
+            for (const team of teams) {
+                if (team.players.length < targetTeam.players.length) {
+                    targetTeam = team;
+                }
             }
             
-            // Si sobran jugadores de este rol, asignarlos aleatoriamente
-            for (let i = numTeams; i < rolePlayers.length; i++) {
-                const randomTeam = Math.floor(Math.random() * numTeams);
-                teams[randomTeam].players.push(rolePlayers[i]);
-                teams[randomTeam].totalMMR += rolePlayers[i].mmr;
-                teams[randomTeam].roles.add(rolePlayers[i].role);
+            if (targetTeam.players.length < 5) {
+                targetTeam.players.push(player);
+                targetTeam.totalMMR += player.mmr;
+                targetTeam.roles.add(player.role);
             }
         }
         
@@ -2359,6 +2386,16 @@ function eloBalanceTeams() {
                 bestScore = score;
                 bestTeams = JSON.parse(JSON.stringify(teams));
                 console.log(`✅ Nueva mejor combinación encontrada en intento ${attempt}: Score ${bestScore.toFixed(2)}`);
+                
+                // Mostrar detalles de la mejora
+                console.log("📋 Detalles de la mejora:");
+                teams.forEach((team, idx) => {
+                    const roleCount = {};
+                    team.players.forEach(p => {
+                        roleCount[p.role] = (roleCount[p.role] || 0) + 1;
+                    });
+                    console.log(`Equipo ${idx + 1}: MMR ${team.totalMMR}, Roles:`, roleCount);
+                });
             }
         }
     }
@@ -2448,5 +2485,132 @@ window.addEventListener('DOMContentLoaded', () => {
     const eloBtn = document.getElementById('eloBalanceBtn');
     if (eloBtn) {
         eloBtn.onclick = eloBalanceTeams;
+    }
+});
+
+// Algoritmo clásico de balanceo por roles y MMR
+function classicBalanceTeams() {
+    if (players.length < 5) {
+        alert('Se necesitan al menos 5 jugadores para formar equipos');
+        return;
+    }
+    const numTeams = Math.floor(players.length / 5);
+    if (numTeams < 2) {
+        alert('Se necesitan al menos 10 jugadores para balancear equipos');
+        return;
+    }
+    
+    console.log("🎯 Iniciando balanceo clásico con prioridad de roles únicos y MMR alto...");
+    
+    // Separar jugadores por roles y ordenar por MMR (descendente)
+    const playersByRole = {
+        1: players.filter(p => p.role === 1).sort((a, b) => b.mmr - a.mmr),
+        2: players.filter(p => p.role === 2).sort((a, b) => b.mmr - a.mmr),
+        3: players.filter(p => p.role === 3).sort((a, b) => b.mmr - a.mmr),
+        4: players.filter(p => p.role === 4).sort((a, b) => b.mmr - a.mmr),
+        5: players.filter(p => p.role === 5).sort((a, b) => b.mmr - a.mmr)
+    };
+    
+    let bestTeams = [];
+    let bestScore = Infinity;
+    let progressCount = 0;
+    
+    for (let attempt = 0; attempt < 1000500; attempt++) {
+        progressCount++;
+        if (progressCount % 100000 === 0) {
+            console.log(`📊 Progreso: ${progressCount}/${1000500} intentos (${Math.round(progressCount/1000500*100)}%)`);
+        }
+        
+        // Crear equipos vacíos
+        let teams = [];
+        for (let i = 0; i < numTeams; i++) {
+            teams.push({ players: [], totalMMR: 0, roles: new Set() });
+        }
+        
+        // Crear copias de los arrays de roles para no modificar los originales
+        const availablePlayers = {
+            1: [...playersByRole[1]],
+            2: [...playersByRole[2]],
+            3: [...playersByRole[3]],
+            4: [...playersByRole[4]],
+            5: [...playersByRole[5]]
+        };
+        
+        // FASE 1: Intentar asignar un jugador de cada rol a cada equipo
+        const roles = [1, 2, 3, 4, 5];
+        for (const role of roles) {
+            // Mezclar el orden de asignación de equipos para este rol
+            const teamOrder = Array.from({length: numTeams}, (_, i) => i);
+            teamOrder.sort(() => Math.random() - 0.5);
+            for (const teamIdx of teamOrder) {
+                if (availablePlayers[role].length > 0 && teams[teamIdx].players.length < 5 && !teams[teamIdx].roles.has(role)) {
+                    const player = availablePlayers[role].shift();
+                    teams[teamIdx].players.push(player);
+                    teams[teamIdx].totalMMR += player.mmr;
+                    teams[teamIdx].roles.add(player.role);
+                }
+            }
+        }
+        // FASE 2: Completar equipos con jugadores restantes (priorizando MMR alto)
+        const remainingPlayers = [];
+        for (const role of roles) {
+            remainingPlayers.push(...availablePlayers[role]);
+        }
+        remainingPlayers.sort((a, b) => b.mmr - a.mmr);
+        for (const player of remainingPlayers) {
+            // Encontrar equipo con menos jugadores
+            let targetTeam = teams[0];
+            for (const team of teams) {
+                if (team.players.length < targetTeam.players.length) {
+                    targetTeam = team;
+                }
+            }
+            if (targetTeam.players.length < 5) {
+                targetTeam.players.push(player);
+                targetTeam.totalMMR += player.mmr;
+                targetTeam.roles.add(player.role);
+            }
+        }
+        // Verificar que todos los equipos tengan exactamente 5 jugadores
+        if (teams.every(team => team.players.length === 5)) {
+            // Score clásico: solo diferencia de total MMR
+            const teamTotals = teams.map(team => team.totalMMR);
+            const maxTotal = Math.max(...teamTotals);
+            const minTotal = Math.min(...teamTotals);
+            const totalDifference = maxTotal - minTotal;
+            if (totalDifference < bestScore) {
+                bestScore = totalDifference;
+                bestTeams = JSON.parse(JSON.stringify(teams));
+                // Mostrar detalles de la mejora
+                if (progressCount % 100000 === 0) {
+                    console.log("📋 Detalles de la mejora:");
+                    teams.forEach((team, idx) => {
+                        const roleCount = {};
+                        team.players.forEach(p => {
+                            roleCount[p.role] = (roleCount[p.role] || 0) + 1;
+                        });
+                        console.log(`Equipo ${idx + 1}: MMR ${team.totalMMR}, Roles:`, roleCount);
+                    });
+                }
+            }
+        }
+    }
+    // Asignar equipos globales
+    teams = bestTeams.map(team => ({
+        players: team.players,
+        totalMMR: team.players.reduce((sum, p) => sum + p.mmr, 0),
+        roles: new Set(team.players.map(p => p.role))
+    }));
+    displayTeams();
+    updateStats();
+    console.log(`🏆 Balanceo clásico completado. Mejor diferencia de MMR: ${bestScore}`);
+    alert(`Balanceo clásico completado.\nMejor diferencia de MMR: ${bestScore}\nTotal de intentos: ${progressCount}`);
+}
+
+// Asignar el botón al balanceo clásico
+window.addEventListener('DOMContentLoaded', () => {
+    const classicBtn = document.getElementById('classicBalanceBtn');
+    if (classicBtn) {
+        classicBtn.onclick = classicBalanceTeams;
     }
 });
