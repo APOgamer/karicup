@@ -1413,15 +1413,24 @@ function savePlayers() {
 
 // Función para cargar jugadores desde localStorage
 function loadPlayers() {
-    const saved = localStorage.getItem('dota2Players');
-    if (saved) {
-        players = JSON.parse(saved);
-        // Asegurar que todos los jugadores tengan índice
-        players.forEach((player, index) => {
-            player.index = index;
-        });
-        console.log(`${players.length} jugadores cargados desde localStorage`);
+    let loaded = [];
+    try {
+        loaded = JSON.parse(localStorage.getItem('players')) || [];
+    } catch (e) {
+        loaded = [];
     }
+    // Limpiar y validar cada jugador
+    players = loaded.filter(p => {
+        // Limpiar espacios
+        if (typeof p.id === 'string') p.id = p.id.trim();
+        if (typeof p.name === 'string') p.name = p.name.trim();
+        if (typeof p.role === 'string' || typeof p.role === 'number') p.role = parseInt(String(p.role).trim());
+        if (typeof p.mmr === 'string' || typeof p.mmr === 'number') p.mmr = parseInt(String(p.mmr).trim());
+
+        // Validar datos: id numérico, nombre no vacío, mmr y rol válidos
+        if (!p.id || isNaN(Number(p.id)) || !p.name || isNaN(p.mmr) || isNaN(p.role)) return false;
+        return true;
+    });
 }
 
 // Función para verificar y asegurar que todos los equipos tengan exactamente 5 jugadores
@@ -2514,6 +2523,7 @@ function classicBalanceTeams() {
     let bestTeams = [];
     let bestScore = Infinity;
     let progressCount = 0;
+    let bestAssigned = [];
     
     for (let attempt = 0; attempt < 1000500; attempt++) {
         progressCount++;
@@ -2581,6 +2591,8 @@ function classicBalanceTeams() {
             if (totalDifference < bestScore) {
                 bestScore = totalDifference;
                 bestTeams = JSON.parse(JSON.stringify(teams));
+                // Guardar los jugadores asignados
+                bestAssigned = teams.flatMap(team => team.players.map(p => p.id));
                 // Mostrar detalles de la mejora
                 if (progressCount % 100000 === 0) {
                     console.log("📋 Detalles de la mejora:");
@@ -2601,6 +2613,13 @@ function classicBalanceTeams() {
         totalMMR: team.players.reduce((sum, p) => sum + p.mmr, 0),
         roles: new Set(team.players.map(p => p.role))
     }));
+    // Detectar jugadores sin asignar
+    const assignedPlayers = bestAssigned;
+    const unassignedPlayers = players.filter(p => !assignedPlayers.includes(p.id));
+    if (unassignedPlayers.length > 0) {
+        alert(`Atención: ${unassignedPlayers.length} jugador(es) no pudieron ser asignados a un equipo completo de 5. Revísalos en la consola.`);
+        console.log('Jugadores sin asignar:', unassignedPlayers.map(p => `${p.name} (ID: ${p.id}, MMR: ${p.mmr}, Rol: ${p.role})`));
+    }
     displayTeams();
     updateStats();
     console.log(`🏆 Balanceo clásico completado. Mejor diferencia de MMR: ${bestScore}`);
@@ -2613,4 +2632,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (classicBtn) {
         classicBtn.onclick = classicBalanceTeams;
     }
+});
+
+// Limpiar localStorage al iniciar la página para evitar datos corruptos
+window.addEventListener('DOMContentLoaded', () => {
+    localStorage.clear();
+    // ...código existente...
 });
